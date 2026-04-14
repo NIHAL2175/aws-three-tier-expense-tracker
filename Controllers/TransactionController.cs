@@ -1,12 +1,24 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
+using Expense_Tracker.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Expense_Tracker.Models;
+using Newtonsoft.Json;
 using System.Security.Claims;
-using Microsoft.AspNetCore.Authorization;
+using iText.Kernel.Pdf;
+using iText.Layout;
+using iText.Layout.Element;
+using iText.Kernel.Geom;
+using iText.Kernel.Colors;
+using iText.Layout.Borders;
+using iText.Layout.Properties;
+using iText.Kernel.Font;
+using iText.IO.Font.Constants;
 
 namespace Expense_Tracker.Controllers
 {
@@ -30,6 +42,12 @@ namespace Expense_Tracker.Controllers
                 .Include(t => t.Category);
 
             return View(await applicationDbContext.ToListAsync());
+        }
+
+        // GET: Transaction/ApiView
+        public IActionResult ApiView()
+        {
+            return View();
         }
 
         // GET: Transaction/AddOrEdit
@@ -59,18 +77,17 @@ namespace Expense_Tracker.Controllers
         public async Task<IActionResult> AddOrEdit([Bind("TransactionId,CategoryId,Amount,Note,Date")] Transaction transaction)
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var isNewTransaction = transaction.TransactionId == 0;
 
             if (ModelState.IsValid)
             {
-                if (transaction.TransactionId == 0)
+                if (isNewTransaction)
                 {
-                    // CREATE
                     transaction.UserId = userId;
                     _context.Add(transaction);
                 }
                 else
                 {
-                    // UPDATE (SAFE)
                     var existingTransaction = await _context.Transactions
                         .FirstOrDefaultAsync(t => t.TransactionId == transaction.TransactionId && t.UserId == userId);
 
@@ -86,6 +103,46 @@ namespace Expense_Tracker.Controllers
                 }
 
                 await _context.SaveChangesAsync();
+
+                if (isNewTransaction)
+                {
+                    var categoryName = transaction.Category?.Title ?? string.Empty;
+                    var categoryType = transaction.Category?.Type ?? string.Empty;
+
+                    if (string.IsNullOrEmpty(categoryName) || string.IsNullOrEmpty(categoryType))
+                    {
+                        var category = await _context.Categories.FindAsync(transaction.CategoryId);
+                        if (category != null)
+                        {
+                            categoryName = category.Title;
+                            categoryType = category.Type;
+                        }
+                    }
+
+                    var payload = new
+                    {
+                        category = categoryName,
+                        amount = transaction.Amount,
+                        type = categoryType,
+                        date = transaction.Date.ToString("yyyy-MM-dd")
+                    };
+
+                    var json = JsonConvert.SerializeObject(payload);
+                    var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                    try
+                    {
+                        using var httpClient = new HttpClient();
+                        await httpClient.PostAsync(
+                            "https://qyj7vtyb6a.execute-api.ap-south-1.amazonaws.com/dev/expense",
+                            content);
+                    }
+                    catch
+                    {
+                        // Ignore AWS call failures so SQL save still succeeds.
+                    }
+                }
+
                 return RedirectToAction(nameof(Index));
             }
 
@@ -93,7 +150,7 @@ namespace Expense_Tracker.Controllers
             return View(transaction);
         }
 
-        // POST: Transaction/Delete/5
+        // DELETE
         [HttpPost, ActionName("Delete")]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DeleteConfirmed(int id)
@@ -124,155 +181,98 @@ namespace Expense_Tracker.Controllers
             };
 
             CategoryCollection.Insert(0, DefaultCategory);
-
             ViewBag.Categories = CategoryCollection;
         }
 
-        // GET: Transaction/ExportPdf
+        // EXPORT PDF (FIXED)
         public async Task<IActionResult> ExportPdf(DateTime? startDate, DateTime? endDate)
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
-            var start = startDate ?? DateTime.Now.AddMonths(-1);
-            var end = endDate ?? DateTime.Now;
+            // FIXED DATE RANGE
+            var start = (startDate ?? DateTime.Today.AddDays(-6)).Date;
+            var end = (endDate ?? DateTime.Today).Date;
 
             var transactions = await _context.Transactions
-                .Where(t => t.UserId == userId && t.Date >= start && t.Date <= end)
+                .Where(t => t.UserId == userId && t.Date >= start && t.Date < end.AddDays(1))
                 .Include(t => t.Category)
                 .OrderByDescending(t => t.Date)
                 .ToListAsync();
 
-            var totalIncome = transactions.Where(t => t.Category?.Type == "Income").Sum(t => t.Amount);
-            var totalExpense = transactions.Where(t => t.Category?.Type == "Expense").Sum(t => t.Amount);
+            // FIXED CATEGORY CHECK
+            var totalIncome = transactions
+                .Where(t => t.Category?.Type?.ToLower() == "income")
+                .Sum(t => t.Amount);
+
+            var totalExpense = transactions
+                .Where(t => t.Category?.Type?.ToLower() == "expense")
+                .Sum(t => t.Amount);
+
             var balance = totalIncome - totalExpense;
 
             using var ms = new MemoryStream();
 
-            var writer = new iText.Kernel.Pdf.PdfWriter(ms);
-            var pdf = new iText.Kernel.Pdf.PdfDocument(writer);
-            var document = new iText.Layout.Document(pdf, iText.Kernel.Geom.PageSize.A4);
+            var writer = new PdfWriter(ms);
+            var pdf = new PdfDocument(writer);
+            var document = new Document(pdf, PageSize.A4);
             document.SetMargins(40, 40, 40, 40);
 
-            // ── Colours ──
-            var green = new iText.Kernel.Colors.DeviceRgb(74, 222, 128);
-            var red = new iText.Kernel.Colors.DeviceRgb(248, 113, 113);
-            var blue = new iText.Kernel.Colors.DeviceRgb(96, 165, 250);
-            var darkBg = new iText.Kernel.Colors.DeviceRgb(13, 20, 25);
-            var cardBg = new iText.Kernel.Colors.DeviceRgb(17, 25, 32);
-            var mutedText = new iText.Kernel.Colors.DeviceRgb(122, 145, 128);
-            var lightText = new iText.Kernel.Colors.DeviceRgb(232, 240, 233);
+            // COLORS
+            var green = new DeviceRgb(74, 222, 128);
+            var red = new DeviceRgb(248, 113, 113);
+            var blue = new DeviceRgb(96, 165, 250);
+            var darkBg = new DeviceRgb(13, 20, 25);
+            var cardBg = new DeviceRgb(17, 25, 32);
+            var mutedText = new DeviceRgb(122, 145, 128);
+            var lightText = new DeviceRgb(232, 240, 233);
 
-            // ── Fonts ──
-            var bold = iText.Kernel.Font.PdfFontFactory.CreateFont(iText.IO.Font.Constants.StandardFonts.HELVETICA_BOLD);
-            var regular = iText.Kernel.Font.PdfFontFactory.CreateFont(iText.IO.Font.Constants.StandardFonts.HELVETICA);
+            // FONTS
+            var bold = PdfFontFactory.CreateFont(StandardFonts.HELVETICA_BOLD);
+            var regular = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
-            
-            // ── Header ──
-            var header = new iText.Layout.Element.Paragraph("SpendSense")
-                .SetFont(bold).SetFontSize(22).SetFontColor(green)
-                .SetMarginBottom(2);
-            document.Add(header);
+            // HEADER
+            document.Add(new Paragraph("SpendSense")
+                .SetFont(bold).SetFontSize(22).SetFontColor(green));
 
-            var sub = new iText.Layout.Element.Paragraph("Financial Report  •  " +
-                      start.ToString("dd MMM yyyy") + " – " + end.ToString("dd MMM yyyy"))
+            document.Add(new Paragraph($"Financial Report • {start:dd MMM yyyy} – {end:dd MMM yyyy}")
                 .SetFont(regular).SetFontSize(9).SetFontColor(mutedText)
-                .SetMarginBottom(20);
-            document.Add(sub);
+                .SetMarginBottom(20));
 
-            // ── Summary Cards (3-column table) ──
-            var summaryTable = new iText.Layout.Element.Table(
-                new float[] { 1, 1, 1 }, true);
-            summaryTable.SetWidth(iText.Layout.Properties.UnitValue.CreatePercentValue(100))
-                        .SetMarginBottom(24);
+            // SUMMARY
+            document.Add(new Paragraph($"Total Income: ₹ {totalIncome:N0}")
+                .SetFont(bold).SetFontColor(green));
 
-            void AddSummaryCell(string label, string value, iText.Kernel.Colors.Color color)
-            {
-                var cell = new iText.Layout.Element.Cell()
-                    .SetBackgroundColor(cardBg)
-                    .SetBorder(new iText.Layout.Borders.SolidBorder(color, 1))
-                    .SetBorderRadius(new iText.Layout.Properties.BorderRadius(8))
-                    .SetPadding(14);
+            document.Add(new Paragraph($"Total Expense: ₹ {totalExpense:N0}")
+                .SetFont(bold).SetFontColor(red));
 
-                cell.Add(new iText.Layout.Element.Paragraph(label)
-                    .SetFont(regular).SetFontSize(8).SetFontColor(mutedText).SetMarginBottom(4));
-                cell.Add(new iText.Layout.Element.Paragraph(value)
-                    .SetFont(bold).SetFontSize(16).SetFontColor(color).SetMarginBottom(0));
+            document.Add(new Paragraph($"Balance: ₹ {balance:N0}")
+                .SetFont(bold).SetFontColor(blue)
+                .SetMarginBottom(20));
 
-                summaryTable.AddCell(cell);
-            }
+            // TABLE
+            var table = new Table(4).UseAllAvailableWidth();
 
-            AddSummaryCell("TOTAL INCOME", "₹ " + totalIncome.ToString("N0"), green);
-            AddSummaryCell("TOTAL EXPENSE", "₹ " + totalExpense.ToString("N0"), red);
-            AddSummaryCell("BALANCE", "₹ " + balance.ToString("N0"), blue);
-            document.Add(summaryTable);
+            table.AddHeaderCell("Category");
+            table.AddHeaderCell("Date");
+            table.AddHeaderCell("Note");
+            table.AddHeaderCell("Amount");
 
-            // ── Section title ──
-            document.Add(new iText.Layout.Element.Paragraph("Transaction Details")
-                .SetFont(bold).SetFontSize(11).SetFontColor(lightText).SetMarginBottom(10));
-
-            // ── Transactions Table ──
-            var table = new iText.Layout.Element.Table(
-                new float[] { 2, 1.5f, 2.5f, 1.2f }, true);
-            table.SetWidth(iText.Layout.Properties.UnitValue.CreatePercentValue(100));
-
-            var headerBg = new iText.Kernel.Colors.DeviceRgb(8, 13, 16);
-
-            foreach (var h in new[] { "CATEGORY", "DATE", "NOTE", "AMOUNT" })
-            {
-                table.AddHeaderCell(
-                    new iText.Layout.Element.Cell()
-                        .SetBackgroundColor(headerBg)
-                        .SetBorder(iText.Layout.Borders.Border.NO_BORDER)
-                        .SetBorderBottom(new iText.Layout.Borders.SolidBorder(mutedText, 1))
-                        .SetPaddingTop(10).SetPaddingBottom(10)
-                        .SetPaddingLeft(8).SetPaddingRight(8)
-                        .Add(new iText.Layout.Element.Paragraph(h)
-                            .SetFont(bold).SetFontSize(7.5f).SetFontColor(mutedText)));
-            }
-
-            bool alt = false;
             foreach (var t in transactions)
             {
-                var rowBg = alt ? cardBg : darkBg;
-                var isIncome = t.Category?.Type == "Income";
-                var amtColor = isIncome ? green : red;
-                var amtText = (isIncome ? "+ " : "- ") + "₹ " + t.Amount.ToString("N0");
+                var isIncome = t.Category?.Type?.ToLower() == "income";
+                var amountText = (isIncome ? "+ " : "- ") + "₹ " + t.Amount.ToString("N0");
 
-                iText.Layout.Element.Cell MakeCell(string text, iText.Kernel.Colors.Color? color = null)
-                {
-                    return new iText.Layout.Element.Cell()
-                        .SetBackgroundColor(rowBg)
-                        .SetBorder(iText.Layout.Borders.Border.NO_BORDER)
-                        .SetBorderBottom(new iText.Layout.Borders.SolidBorder(
-                            new iText.Kernel.Colors.DeviceRgb(255, 255, 255), 0.03f))
-                        .SetPaddingTop(9).SetPaddingBottom(9)
-                        .SetPaddingLeft(8).SetPaddingRight(8)
-                        .Add(new iText.Layout.Element.Paragraph(text)
-                            .SetFont(regular).SetFontSize(9)
-                            .SetFontColor(color ?? lightText));
-                }
-
-                table.AddCell(MakeCell(t.Category?.Title ?? "—"));
-                table.AddCell(MakeCell(t.Date.ToString("dd MMM yy")));
-                table.AddCell(MakeCell(t.Note ?? "—"));
-                table.AddCell(MakeCell(amtText, amtColor));
-
-                alt = !alt;
+                table.AddCell(t.Category?.Title ?? "-");
+                table.AddCell(t.Date.ToString("dd MMM yyyy"));
+                table.AddCell(t.Note ?? "-");
+                table.AddCell(amountText);
             }
 
             document.Add(table);
 
-            // ── Footer ──
-            document.Add(new iText.Layout.Element.Paragraph(
-                    "\nGenerated by SpendSense  •  " + DateTime.Now.ToString("dd MMM yyyy, hh:mm tt"))
-                .SetFont(regular).SetFontSize(8).SetFontColor(mutedText)
-                .SetTextAlignment(iText.Layout.Properties.TextAlignment.CENTER)
-                .SetMarginTop(16));
-
             document.Close();
 
-            var fileName = $"SpendSense_Report_{start:yyyyMMdd}_{end:yyyyMMdd}.pdf";
-            return File(ms.ToArray(), "application/pdf", fileName);
+            return File(ms.ToArray(), "application/pdf", "Report.pdf");
         }
     }
 }

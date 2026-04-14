@@ -185,7 +185,7 @@
                 </div>
             </a>
 
-            <a href="/Transaction/ExportPdf?startDate=@ViewBag.StartDate&endDate=@ViewBag.EndDate"
+            <a href="/Transaction/ExportPdf?startDate=@ViewBag.StartDate.ToString("yyyy-MM-dd")&endDate=@ViewBag.EndDate.ToString("yyyy-MM-dd")"
                class="qa-item"
                style="border:1px solid rgba(167,139,250,.12); background:rgba(167,139,250,.04);"
                onmouseover="this.style.background='rgba(167,139,250,.09)'"

@@ -1,4 +1,5 @@
 using Expense_Tracker.Models;
+using Expense_Tracker.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 
@@ -10,6 +11,8 @@ builder.Services.AddControllersWithViews();
 //DI
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 options.UseSqlServer(builder.Configuration.GetConnectionString("DevConnection")));
+
+builder.Services.AddScoped<TransactionService>();
 
 //adding my identity here
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
