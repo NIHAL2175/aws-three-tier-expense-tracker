@@ -1,7 +1,7 @@
-# 💰 AWS Serverless Expense Tracker
+# 💰 AWS Three Tier Expense Tracker
 
 ### 📌 Project Level: Intermediate  
-A fully serverless expense tracking app built using AWS Lambda, API Gateway, and DynamoDB.
+A Three-Tier Expense Tracking web application built using AWS services including EC2, Lambda, API Gateway, DynamoDB and IAM designed for scalability and cost efficiency.
 
 ---
 
@@ -9,9 +9,9 @@ A fully serverless expense tracking app built using AWS Lambda, API Gateway, and
 
 Track your expenses in real-time, no servers, no hassle.
 
-• Add, view, update, and delete expenses  
+• Add, view, update and delete expenses  
 • Backend powered entirely by AWS serverless services  
-• Fast, scalable, and cost-efficient  
+• Fast, scalable and cost-efficient  
 
 ---
 
@@ -31,6 +31,7 @@ User → API Gateway → Lambda → DynamoDB → Response → UI
 
 ### 🧰 Tech Stack
 
+• EC2 Instance
 • AWS Lambda  
 • API Gateway  
 • DynamoDB  
@@ -52,8 +53,6 @@ User → API Gateway → Lambda → DynamoDB → Response → UI
 
 ### 🚀 Key Features
 
-• Fully serverless (no EC2)  
-• Complete CRUD operations  
 • Real-time updates  
 • Clean dashboard UI  
 • Scalable by design  
@@ -64,16 +63,13 @@ User → API Gateway → Lambda → DynamoDB → Response → UI
 
 This project shows how modern apps are built:
 
-• No servers to manage  
 • Pay only for what you use  
 • Built for scale from day one  
-
-
 
 ---
 
 ### 🏁 Outcome
 
-• Built a real-world serverless application  
+• Built a real-world application  
 • Learned API-driven architecture  
 • Hands-on with core AWS services  
