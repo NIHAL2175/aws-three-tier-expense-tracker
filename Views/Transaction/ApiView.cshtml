@@ -1,0 +1,100 @@
+@{
+    ViewData["Title"] = "API Transactions";
+}
+
+<div class="api-page" style="padding:24px; max-width:900px; margin:0 auto; color:#e5e7eb;">
+    <h1 style="margin-bottom:12px; color:#fff;">API Transactions</h1>
+    <p style="margin-bottom:20px; color:#9ca3af;">
+        This page loads transactions from AWS API Gateway using JavaScript.
+    </p>
+
+    <div style="background:#0f172a; border:1px solid rgba(148,163,184,.12); border-radius:12px; overflow:hidden;">
+        <table id="api-transactions-table" style="width:100%; border-collapse:collapse;">
+            <thead style="background:#111827; color:#9ca3af; text-align:left;">
+                <tr>
+                    <th style="padding:14px 12px; border-bottom:1px solid rgba(148,163,184,.12);">Category</th>
+                    <th style="padding:14px 12px; border-bottom:1px solid rgba(148,163,184,.12); text-align:right;">Amount</th>
+                    <th style="padding:14px 12px; border-bottom:1px solid rgba(148,163,184,.12);">Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td colspan="3" style="padding:20px; text-align:center; color:#9ca3af;">
+                        Loading transactions...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <p id="api-transactions-error" style="display:none; margin-top:16px; color:#f87171;"></p>
+</div>
+
+<script>
+    async function loadApiTransactions() {
+        const tableBody = document.querySelector('#api-transactions-table tbody');
+        const errorMessage = document.getElementById('api-transactions-error');
+
+        try {
+            // ✅ AWS API CALL
+            const response = await fetch('https://qyj7vtyb6a.execute-api.ap-south-1.amazonaws.com/dev/expense');
+
+            if (!response.ok) {
+                throw new Error('Server returned ' + response.status);
+            }
+
+            const transactions = await response.json();
+
+            if (!Array.isArray(transactions) || transactions.length === 0) {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="3" style="padding:20px; text-align:center; color:#9ca3af;">
+                            No transactions found.
+                        </td>
+                    </tr>`;
+                return;
+            }
+
+            tableBody.innerHTML = '';
+
+            transactions.forEach(tx => {
+                // ✅ FIXED CATEGORY
+                const category = tx.category || 'Unknown';
+
+                const amount = tx.amount != null
+                    ? `₹ ${Number(tx.amount).toLocaleString('en-IN')}`
+                    : '₹ 0';
+
+                const date = tx.date
+                    ? new Date(tx.date).toLocaleDateString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric'
+                    })
+                    : '';
+
+                tableBody.insertAdjacentHTML('beforeend', `
+                    <tr>
+                        <td style="padding:14px 12px; border-bottom:1px solid rgba(148,163,184,.08);">
+                            ${category}
+                        </td>
+                        <td style="padding:14px 12px; border-bottom:1px solid rgba(148,163,184,.08); text-align:right;">
+                            ${amount}
+                        </td>
+                        <td style="padding:14px 12px; border-bottom:1px solid rgba(148,163,184,.08);">
+                            ${date}
+                        </td>
+                    </tr>
+                `);
+            });
+
+        } catch (error) {
+            console.error('API load failed:', error);
+            errorMessage.textContent = 'Unable to load transactions from AWS. Please check API Gateway and try again.';
+            errorMessage.style.display = 'block';
+            tableBody.innerHTML = '';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadApiTransactions);
+</script>
